@@ -89,8 +89,8 @@ async fn main() -> Result<()> {
         SpeedTestTarget { exchange: "HashKey".to_string(), endpoint: "stream-pro.hashkey.com:443".to_string() },
         SpeedTestTarget { exchange: "HashKeyGlobal".to_string(), endpoint: "api-glb.hashkey.com:443".to_string() },
         SpeedTestTarget { exchange: "HashKeyGlobal".to_string(), endpoint: "stream-glb.hashkey.com:443".to_string() },
-        SpeedTestTarget { exchange: "BackPack".to_string(), endpoint: "api.backpack.exchange:443".to_string() },
-        SpeedTestTarget { exchange: "BackPack".to_string(), endpoint: "ws.backpack.exchange:443".to_string() },
+        // SpeedTestTarget { exchange: "BackPack".to_string(), endpoint: "api.backpack.exchange:443".to_string() },
+        // SpeedTestTarget { exchange: "BackPack".to_string(), endpoint: "ws.backpack.exchange:443".to_string() },
         SpeedTestTarget { exchange: "BtcTurk".to_string(), endpoint: "api.btcturk.com:443".to_string() },
         SpeedTestTarget { exchange: "BtcTurk".to_string(), endpoint: "ws-feed-pro.btcturk.com:443".to_string() },
     ];
