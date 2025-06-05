@@ -50,7 +50,7 @@ const HOSTS_MARKER_END: &str = "# End TCP Speed Test";
 const TEST_ATTEMPTS: usize = 5; // 每个IP测速次数
 const CONNECTION_TIMEOUT_SECS: u64 = 5; // 连接超时时间，5s
 const TEST_INTERVAL_MINS: u64 = 5; // 每5分钟执行一次
-const RETENTION_HOURS: i64 = 10; // 10小时后清理旧记录
+const RETENTION_HOURS: i64 = 1; // 1小时后清理旧记录
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -89,8 +89,8 @@ async fn main() -> Result<()> {
         SpeedTestTarget { exchange: "HashKey".to_string(), endpoint: "stream-pro.hashkey.com:443".to_string() },
         SpeedTestTarget { exchange: "HashKeyGlobal".to_string(), endpoint: "api-glb.hashkey.com:443".to_string() },
         SpeedTestTarget { exchange: "HashKeyGlobal".to_string(), endpoint: "stream-glb.hashkey.com:443".to_string() },
-        // SpeedTestTarget { exchange: "BackPack".to_string(), endpoint: "api.backpack.exchange:443".to_string() },
-        // SpeedTestTarget { exchange: "BackPack".to_string(), endpoint: "ws.backpack.exchange:443".to_string() },
+        SpeedTestTarget { exchange: "BackPack".to_string(), endpoint: "api.backpack.exchange:443".to_string() },
+        SpeedTestTarget { exchange: "BackPack".to_string(), endpoint: "ws.backpack.exchange:443".to_string() },
         SpeedTestTarget { exchange: "BtcTurk".to_string(), endpoint: "api.btcturk.com:443".to_string() },
         SpeedTestTarget { exchange: "BtcTurk".to_string(), endpoint: "ws-feed-pro.btcturk.com:443".to_string() },
     ];
