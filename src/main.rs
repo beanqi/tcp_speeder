@@ -6,6 +6,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use std::fs; // Added for reading config file
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, Utc};
@@ -28,10 +29,16 @@ struct SpeedTestRecord {
 }
 
 // 测速目标结构体
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // Added Serialize and Deserialize
 struct SpeedTestTarget {
     exchange: String,
     endpoint: String,
+}
+
+// New struct for config file structure
+#[derive(Deserialize)]
+struct Config {
+    targets: Vec<SpeedTestTarget>,
 }
 
 // 加权IP结果结构体
@@ -51,6 +58,23 @@ const TEST_ATTEMPTS: usize = 5; // 每个IP测速次数
 const CONNECTION_TIMEOUT_SECS: u64 = 5; // 连接超时时间，5s
 const TEST_INTERVAL_MINS: u64 = 5; // 每5分钟执行一次
 const RETENTION_HOURS: i64 = 1; // 1小时后清理旧记录
+const CONFIG_PATH: &str = "targets.toml"; // Path to the configuration file
+
+// Function to load targets from TOML config file
+fn load_targets_from_config(path: &str) -> Result<Vec<SpeedTestTarget>> {
+    let content = fs::read_to_string(path)
+        .context(format!("读取配置文件 {} 失败. 请确保文件存在且格式正确.", path))?;
+    
+    if content.trim().is_empty() {
+        println!("配置文件 {} 为空.", path);
+        return Ok(Vec::new());
+    }
+    
+    let config: Config = toml::from_str(&content)
+        .context(format!("解析配置文件 {} 失败. 请检查TOML格式.", path))?;
+    
+    Ok(config.targets)
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -58,43 +82,25 @@ async fn main() -> Result<()> {
     println!("结果将保存至: {}", RESULTS_PATH);
     println!("测试将每 {} 分钟运行一次", TEST_INTERVAL_MINS);
     println!("结果将保留 {} 小时", RETENTION_HOURS);
+    println!("将从 {} 加载测速目标", CONFIG_PATH);
     
-    // 定义测试目标
-    let targets = vec![
-        SpeedTestTarget { exchange: "Binance".to_string(), endpoint: "api.binance.com:443".to_string() },
-        SpeedTestTarget { exchange: "Binance".to_string(), endpoint: "stream.binance.com:9443".to_string() },
-        SpeedTestTarget { exchange: "Huobi".to_string(), endpoint: "api-aws.huobi.pro:443".to_string() },
-        SpeedTestTarget { exchange: "Huobi".to_string(), endpoint: "api-aws.huobi.pro:443".to_string() },
-        SpeedTestTarget { exchange: "OKEX".to_string(), endpoint: "www.okx.com:443".to_string() },
-        SpeedTestTarget { exchange: "OKEX".to_string(), endpoint: "ws.okx.com:8443".to_string() },
-        SpeedTestTarget { exchange: "Coinbase".to_string(), endpoint: "api.exchange.coinbase.com:443".to_string() },
-        SpeedTestTarget { exchange: "Coinbase".to_string(), endpoint: "ws-feed.exchange.coinbase.com:443".to_string() },
-        SpeedTestTarget { exchange: "Kraken".to_string(), endpoint: "api.kraken.com:443".to_string() },
-        SpeedTestTarget { exchange: "Kraken".to_string(), endpoint: "ws.kraken.com:443".to_string() },
-        SpeedTestTarget { exchange: "Gate".to_string(), endpoint: "api.gateio.ws:443".to_string() },
-        SpeedTestTarget { exchange: "Gate".to_string(), endpoint: "api.gateio.ws:443".to_string() },
-        SpeedTestTarget { exchange: "KuCoin".to_string(), endpoint: "openapi-v2.kucoin.com:443".to_string() },
-        SpeedTestTarget { exchange: "KuCoin".to_string(), endpoint: "ws-api-spot.kucoin.com:443".to_string() },
-        SpeedTestTarget { exchange: "BitGet".to_string(), endpoint: "api.bitget.com:443".to_string() },
-        SpeedTestTarget { exchange: "BitGet".to_string(), endpoint: "ws.bitget.com:443".to_string() },
-        SpeedTestTarget { exchange: "MXC".to_string(), endpoint: "api.mexc.co:443".to_string() },
-        SpeedTestTarget { exchange: "MXC".to_string(), endpoint: "wbs.mexc.co:443".to_string() },
-        SpeedTestTarget { exchange: "Bybit".to_string(), endpoint: "api.bybit.com:443".to_string() },
-        SpeedTestTarget { exchange: "Bybit".to_string(), endpoint: "stream.bybit.com:443".to_string() },
-        SpeedTestTarget { exchange: "CoinEx".to_string(), endpoint: "api.coinex.com:443".to_string() },
-        SpeedTestTarget { exchange: "CoinEx".to_string(), endpoint: "socket.coinex.com:443".to_string() },
-        SpeedTestTarget { exchange: "Crypto".to_string(), endpoint: "api.crypto.com:443".to_string() },
-        SpeedTestTarget { exchange: "Crypto".to_string(), endpoint: "stream.crypto.com:443".to_string() },
-        SpeedTestTarget { exchange: "HashKey".to_string(), endpoint: "api-pro.hashkey.com:443".to_string() },
-        SpeedTestTarget { exchange: "HashKey".to_string(), endpoint: "stream-pro.hashkey.com:443".to_string() },
-        SpeedTestTarget { exchange: "HashKeyGlobal".to_string(), endpoint: "api-glb.hashkey.com:443".to_string() },
-        SpeedTestTarget { exchange: "HashKeyGlobal".to_string(), endpoint: "stream-glb.hashkey.com:443".to_string() },
-        SpeedTestTarget { exchange: "BackPack".to_string(), endpoint: "api.backpack.exchange:443".to_string() },
-        SpeedTestTarget { exchange: "BackPack".to_string(), endpoint: "ws.backpack.exchange:443".to_string() },
-        SpeedTestTarget { exchange: "BtcTurk".to_string(), endpoint: "api.btcturk.com:443".to_string() },
-        SpeedTestTarget { exchange: "BtcTurk".to_string(), endpoint: "ws-feed-pro.btcturk.com:443".to_string() },
-    ];
-
+    // 从配置文件加载测试目标
+    let targets = match load_targets_from_config(CONFIG_PATH) {
+        Ok(loaded_targets) => {
+            if loaded_targets.is_empty() {
+                println!("配置文件 {} 中未定义任何测速目标，或文件为空. 程序将退出.", CONFIG_PATH);
+                return Ok(());
+            }
+            println!("从 {} 成功加载 {} 个测速目标.", CONFIG_PATH, loaded_targets.len());
+            loaded_targets
+        }
+        Err(e) => {
+            eprintln!("加载配置文件 {} 失败: {}", CONFIG_PATH, e);
+            println!("请创建 {} 文件并按要求配置测速目标，或者检查文件格式是否正确。", CONFIG_PATH);
+            return Err(e);
+        }
+    };
+    
     // 初始化DNS解析器
     let resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())
         .context("创建DNS解析器失败")?;

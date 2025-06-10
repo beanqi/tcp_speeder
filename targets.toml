@@ -1,0 +1,136 @@
+# Configuration file for TCP Speed Tester targets.
+# Each target is defined by an exchange name and an endpoint (domain:port).
+
+[[targets]]
+exchange = "Binance"
+endpoint = "api.binance.com:443"
+
+[[targets]]
+exchange = "Binance"
+endpoint = "stream.binance.com:9443"
+
+[[targets]]
+exchange = "Huobi"
+endpoint = "api-aws.huobi.pro:443"
+# Note: The original list had a duplicate "api-aws.huobi.pro:443". 
+# You can keep it if intended, or remove one.
+# [[targets]]
+# exchange = "Huobi"
+# endpoint = "api-aws.huobi.pro:443" 
+
+[[targets]]
+exchange = "OKEX"
+endpoint = "www.okx.com:443"
+
+[[targets]]
+exchange = "OKEX"
+endpoint = "ws.okx.com:8443"
+
+[[targets]]
+exchange = "Coinbase"
+endpoint = "api.exchange.coinbase.com:443"
+
+[[targets]]
+exchange = "Coinbase"
+endpoint = "ws-feed.exchange.coinbase.com:443"
+
+[[targets]]
+exchange = "Kraken"
+endpoint = "api.kraken.com:443"
+
+[[targets]]
+exchange = "Kraken"
+endpoint = "ws.kraken.com:443"
+
+[[targets]]
+exchange = "Gate"
+endpoint = "api.gateio.ws:443"
+# Note: The original list had a duplicate "api.gateio.ws:443".
+# [[targets]]
+# exchange = "Gate"
+# endpoint = "api.gateio.ws:443"
+
+[[targets]]
+exchange = "KuCoin"
+endpoint = "openapi-v2.kucoin.com:443"
+
+[[targets]]
+exchange = "KuCoin"
+endpoint = "ws-api-spot.kucoin.com:443"
+
+[[targets]]
+exchange = "BitGet"
+endpoint = "api.bitget.com:443"
+
+[[targets]]
+exchange = "BitGet"
+endpoint = "ws.bitget.com:443"
+
+[[targets]]
+exchange = "MXC"
+endpoint = "api.mexc.co:443"
+
+[[targets]]
+exchange = "MXC"
+endpoint = "wbs.mexc.co:443"
+
+[[targets]]
+exchange = "Bybit"
+endpoint = "api.bybit.com:443"
+
+[[targets]]
+exchange = "Bybit"
+endpoint = "stream.bybit.com:443"
+
+[[targets]]
+exchange = "CoinEx"
+endpoint = "api.coinex.com:443"
+
+[[targets]]
+exchange = "CoinEx"
+endpoint = "socket.coinex.com:443"
+
+[[targets]]
+exchange = "Crypto"
+endpoint = "api.crypto.com:443"
+
+[[targets]]
+exchange = "Crypto"
+endpoint = "stream.crypto.com:443"
+
+[[targets]]
+exchange = "HashKey"
+endpoint = "api-pro.hashkey.com:443"
+
+[[targets]]
+exchange = "HashKey"
+endpoint = "stream-pro.hashkey.com:443"
+
+[[targets]]
+exchange = "HashKeyGlobal"
+endpoint = "api-glb.hashkey.com:443"
+
+[[targets]]
+exchange = "HashKeyGlobal"
+endpoint = "stream-glb.hashkey.com:443"
+
+[[targets]]
+exchange = "BackPack"
+endpoint = "api.backpack.exchange:443"
+
+[[targets]]
+exchange = "BackPack"
+endpoint = "ws.backpack.exchange:443"
+
+[[targets]]
+exchange = "BtcTurk"
+endpoint = "api.btcturk.com:443"
+
+[[targets]]
+exchange = "BtcTurk"
+endpoint = "ws-feed-pro.btcturk.com:443"
+
+# Add more targets as needed following the same format:
+# [[targets]]
+# exchange = "YourExchangeName"
+# endpoint = "your.endpoint.com:port"
