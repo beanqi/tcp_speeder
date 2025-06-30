@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::fs; // Added for reading config file
+use std::fs;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, Utc};
@@ -29,7 +29,7 @@ struct SpeedTestRecord {
 }
 
 // 测速目标结构体
-#[derive(Debug, Clone, Serialize, Deserialize)] // Added Serialize and Deserialize
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SpeedTestTarget {
     exchange: String,
     endpoint: String,
@@ -126,7 +126,7 @@ async fn main() -> Result<()> {
                 eprintln!("保存结果失败: {}", e);
             }
             
-            // 清理旧结果(超过10小时)
+            // 清理旧结果(超过指定小时)
             if let Err(e) = cleanup_old_results().await {
                 eprintln!("清理旧结果失败: {}", e);
             }
@@ -167,7 +167,6 @@ async fn run_speed_tests(
         println!("[{}/{}] 测试 {} - {}", 
                  index + 1, targets.len(), target.exchange, target.endpoint);
         
-        // 分割端点为主机名和端口
         let parts: Vec<&str> = target.endpoint.split(':').collect();
         if parts.len() != 2 {
             println!("  无效的端点格式: {}", target.endpoint);
@@ -183,7 +182,6 @@ async fn run_speed_tests(
             }
         };
         
-        // DNS解析获取IP地址
         println!("  解析 {} 的DNS", domain);
         let lookup = match resolver.lookup_ip(&domain).await {
             Ok(l) => l,
@@ -204,7 +202,6 @@ async fn run_speed_tests(
         for (ip_index, ip) in ips.iter().enumerate() {
             println!("  测试IP [{}/{}]: {}", ip_index + 1, ips.len(), ip);
             
-            // 测试此IP的TCP连接速度(5次尝试的平均值)
             let mut total_time_ms = 0.0;
             let mut successful_attempts = 0;
             
@@ -212,23 +209,18 @@ async fn run_speed_tests(
                 let socket_addr = SocketAddr::new(*ip, port);
                 let start = Instant::now();
                 
-                // 使用tokio::time::timeout限制连接时间
                 match tokio::time::timeout(timeout, TcpStream::connect(socket_addr)).await {
-                    Ok(result) => {
-                        match result {
-                            Ok(_) => {
-                                let elapsed = start.elapsed();
-                                let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
-                                total_time_ms += elapsed_ms;
-                                successful_attempts += 1;
-                                println!("    尝试 {}: 连接成功，耗时 {:.2}ms", 
-                                         attempt, elapsed_ms);
-                            }
-                            Err(e) => {
-                                println!("    尝试 {}: 连接失败 - {}", 
-                                         attempt, e);
-                            }
-                        }
+                    Ok(Ok(_)) => {
+                        let elapsed = start.elapsed();
+                        let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
+                        total_time_ms += elapsed_ms;
+                        successful_attempts += 1;
+                        println!("    尝试 {}: 连接成功，耗时 {:.2}ms", 
+                                 attempt, elapsed_ms);
+                    }
+                    Ok(Err(e)) => {
+                        println!("    尝试 {}: 连接失败 - {}", 
+                                 attempt, e);
                     }
                     Err(_) => {
                         println!("    尝试 {}: 连接超时，超过 {}s", 
@@ -236,7 +228,6 @@ async fn run_speed_tests(
                     }
                 }
                 
-                // 连接尝试之间添加小延迟
                 sleep(Duration::from_millis(100)).await;
             }
             
@@ -267,7 +258,6 @@ async fn run_speed_tests(
 }
 
 async fn save_results(results: &[SpeedTestRecord]) -> Result<()> {
-    // 创建或打开CSV文件
     let file_exists = Path::new(RESULTS_PATH).exists();
     
     let file = OpenOptions::new()
@@ -281,7 +271,6 @@ async fn save_results(results: &[SpeedTestRecord]) -> Result<()> {
         .has_headers(!file_exists)
         .from_writer(file);
     
-    // 写入结果
     for record in results {
         wtr.serialize(record).context("写入记录失败")?;
     }
@@ -297,10 +286,8 @@ async fn cleanup_old_results() -> Result<()> {
         return Ok(());
     }
     
-    // 读取所有记录
     let file = File::open(RESULTS_PATH).context("打开结果文件失败")?;
-    let reader = BufReader::new(file);
-    let mut rdr = csv::ReaderBuilder::new().from_reader(reader);
+    let mut rdr = csv::ReaderBuilder::new().from_reader(BufReader::new(file));
     
     let mut records: Vec<SpeedTestRecord> = Vec::new();
     for result in rdr.deserialize() {
@@ -308,7 +295,6 @@ async fn cleanup_old_results() -> Result<()> {
         records.push(record);
     }
     
-    // 过滤掉超过指定小时数的记录
     let cutoff = Utc::now() - chrono::Duration::hours(RETENTION_HOURS);
     let old_count = records.len();
     records.retain(|r| r.timestamp >= cutoff);
@@ -319,9 +305,7 @@ async fn cleanup_old_results() -> Result<()> {
         return Ok(());
     }
     
-    // 写回过滤后的记录
-    let file = File::create(RESULTS_PATH).context("创建结果文件失败")?;
-    let mut wtr = csv::Writer::from_writer(file);
+    let mut wtr = csv::Writer::from_path(RESULTS_PATH).context("创建结果文件用于写入失败")?;
     
     for record in &records {
         wtr.serialize(record).context("写入记录失败")?;
@@ -334,90 +318,162 @@ async fn cleanup_old_results() -> Result<()> {
     Ok(())
 }
 
-async fn update_hosts_file() -> Result<()> {
-    // 读取当前速度测试结果
+// =================================================================
+// ==================== 新增和修改部分开始 ====================
+// =================================================================
+
+/// [新增] 检查指定IP和端口的连通性
+async fn verify_connectivity(ip_str: &str, port: u16) -> bool {
+    let ip: IpAddr = match ip_str.parse() {
+        Ok(ip) => ip,
+        Err(_) => {
+            println!("  -> 无效的IP地址格式: {}", ip_str);
+            return false;
+        }
+    };
+    let socket_addr = SocketAddr::new(ip, port);
+    let timeout = Duration::from_secs(CONNECTION_TIMEOUT_SECS);
+
+    match tokio::time::timeout(timeout, TcpStream::connect(socket_addr)).await {
+        Ok(Ok(_)) => true, // 连接成功
+        _ => false, // 连接超时或失败
+    }
+}
+
+/// [新增] 从CSV历史记录中删除所有关于某个无效IP的条目
+async fn remove_stale_records_from_csv(domain_to_remove: &str, ip_to_remove: &str) -> Result<()> {
     if !Path::new(RESULTS_PATH).exists() {
-        println!("还没有速度测试结果");
+        return Ok(());
+    }
+
+    // 读取所有记录
+    let file = File::open(RESULTS_PATH).context("打开结果文件以进行清理失败")?;
+    let mut rdr = csv::Reader::from_reader(BufReader::new(file));
+    let records: Vec<SpeedTestRecord> = rdr.deserialize().collect::<Result<_, _>>()
+        .context("反序列化记录以进行清理失败")?;
+    
+    let initial_count = records.len();
+
+    // 过滤掉所有匹配无效domain和ip的记录
+    let valid_records: Vec<SpeedTestRecord> = records
+        .into_iter()
+        .filter(|rec| !(rec.domain == domain_to_remove && rec.ip == ip_to_remove))
+        .collect();
+
+    let final_count = valid_records.len();
+
+    if initial_count == final_count {
+        return Ok(()); // 没有记录被删除
+    }
+
+    // 将过滤后的记录写回临时文件
+    let temp_path_str = format!("{}.tmp", RESULTS_PATH);
+    let temp_path = Path::new(&temp_path_str);
+    {
+        let mut wtr = csv::Writer::from_path(temp_path).context("创建临时结果文件失败")?;
+        for record in &valid_records {
+            wtr.serialize(record).context("向临时文件写入记录失败")?;
+        }
+        wtr.flush().context("刷新临时文件写入器失败")?;
+    }
+
+    // 用临时文件覆盖原文件
+    fs::rename(temp_path, RESULTS_PATH).context("用临时文件替换原始结果文件失败")?;
+
+    println!("  -> 已从 {} 中删除 {} 条关于失效IP {} (域名: {}) 的陈旧记录", 
+             RESULTS_PATH, initial_count - final_count, ip_to_remove, domain_to_remove);
+
+    Ok(())
+}
+
+/// [修改] 更新了 `update_hosts_file` 函数的逻辑
+async fn update_hosts_file() -> Result<()> {
+    if !Path::new(RESULTS_PATH).exists() {
+        println!("还没有速度测试结果，跳过hosts文件更新");
         return Ok(());
     }
     
     let file = File::open(RESULTS_PATH).context("打开结果文件失败")?;
-    let reader = BufReader::new(file);
-    let mut rdr = csv::ReaderBuilder::new().from_reader(reader);
+    let mut rdr = csv::ReaderBuilder::new().from_reader(BufReader::new(file));
     
-    let mut records: Vec<SpeedTestRecord> = Vec::new();
-    for result in rdr.deserialize() {
-        let record: SpeedTestRecord = result.context("反序列化记录失败")?;
-        records.push(record);
-    }
+    let records: Vec<SpeedTestRecord> = rdr.deserialize().collect::<Result<_,_>>()?;
     
     if records.is_empty() {
-        println!("没有发现速度测试记录");
+        println!("速度测试记录为空");
         return Ok(());
     }
     
-    println!("从 {} 条记录中计算最佳IP", records.len());
+    println!("从 {} 条记录中计算并验证最佳IP", records.len());
     
-    // 计算每个域名的最佳IP
-    let mut domain_ips: HashMap<String, Vec<WeightedIpResult>> = HashMap::new();
+    // 改进的权重计算: 先分组，再计算平均值
+    let mut ip_data: HashMap<(String, String), (Vec<f64>, Vec<f64>)> = HashMap::new(); // (domain, ip) -> (times, weights)
     
     for record in &records {
-        // 基于时效性和速度计算权重
         let now = Utc::now();
         let hours_old = (now - record.timestamp).num_seconds() as f64 / 3600.0;
-        let recency_weight = if hours_old <= 1.0 {
-            1.0
-        } else if hours_old <= 5.0 {
-            0.8
-        } else {
-            0.5
-        };
-        
-        // 反转连接时间(较低更好)
-        let speed_weight = 1000.0 / (record.connection_time_ms + 10.0); // 添加小常数避免除以零
-        
+        let recency_weight = if hours_old <= 1.0 { 1.0 } else if hours_old <= 5.0 { 0.8 } else { 0.5 };
+        let speed_weight = 1000.0 / (record.connection_time_ms + 10.0); // 加上小常数防止除以零
         let weight = recency_weight * speed_weight;
         
-        // 存储加权IP结果
-        let entry = domain_ips.entry(record.domain.clone()).or_insert_with(Vec::new);
-        
-        // 检查是否已有此IP
-        let mut found = false;
-        for ip_result in entry.iter_mut() {
-            if ip_result.ip == record.ip {
-                // 用新权重和平均速度更新现有条目
-                ip_result.weight = (ip_result.weight + weight) / 2.0;
-                ip_result.average_speed = (ip_result.average_speed + record.connection_time_ms) / 2.0;
-                found = true;
-                break;
-            }
-        }
-        
-        if !found {
-            entry.push(WeightedIpResult {
-                ip: record.ip.clone(),
-                average_speed: record.connection_time_ms,
-                weight,
-            });
-        }
+        let entry = ip_data.entry((record.domain.clone(), record.ip.clone())).or_default();
+        entry.0.push(record.connection_time_ms);
+        entry.1.push(weight);
     }
     
-    // 找出每个域的最佳IP(最高权重)
+    let mut domain_ips: HashMap<String, Vec<WeightedIpResult>> = HashMap::new();
+    for ((domain, ip), (times, weights)) in ip_data {
+        let avg_speed = times.iter().sum::<f64>() / times.len() as f64;
+        let avg_weight = weights.iter().sum::<f64>() / weights.len() as f64;
+        
+        domain_ips.entry(domain).or_default().push(WeightedIpResult {
+            ip,
+            average_speed: avg_speed,
+            weight: avg_weight,
+        });
+    }
+
     let mut best_ips: HashMap<String, String> = HashMap::new();
     
-    for (domain, ips) in &domain_ips {
-        if let Some(best) = ips.iter().max_by(|a, b| {
-            a.weight.partial_cmp(&b.weight).unwrap_or(std::cmp::Ordering::Equal)
-        }) {
-            best_ips.insert(domain.clone(), best.ip.clone());
-            println!("{} 的最佳IP: {} (平均速度: {:.2}ms, 权重: {:.2})", 
-                     domain, best.ip, best.average_speed, best.weight);
+    for (domain, ips) in &mut domain_ips {
+        // 按权重降序排序，选出最优的IP进行尝试
+        ips.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+        
+        let port = match records.iter().find(|r| r.domain == *domain) {
+            Some(r) => r.port,
+            None => {
+                println!("警告: 未能在记录中找到域名 {} 的端口信息，跳过此域名。", domain);
+                continue;
+            }
+        };
+
+        let mut valid_ip_found = false;
+        for candidate in ips {
+            println!("正在验证 {} 的候选IP: {} (端口: {})", domain, candidate.ip, port);
+
+            if verify_connectivity(&candidate.ip, port).await {
+                println!("  -> IP {} 验证通过. 平均速度: {:.2}ms, 权重: {:.2}", 
+                         candidate.ip, candidate.average_speed, candidate.weight);
+                best_ips.insert(domain.clone(), candidate.ip.clone());
+                valid_ip_found = true;
+                break; // 找到可用IP，处理下一个域名
+            } else {
+                println!("  -> IP {} 验证失败. 正在从历史记录中移除...", candidate.ip);
+                remove_stale_records_from_csv(domain, &candidate.ip).await?;
+            }
+        }
+
+        if !valid_ip_found {
+            println!("警告: 在对域名 {} 的所有候选IP进行验证后，未找到可用IP。", domain);
         }
     }
     
-    // 更新hosts文件
+    // 使用经过验证的IP更新hosts文件
     update_linux_hosts_file(&best_ips).context("更新hosts文件失败")
 }
+
+// ===============================================================
+// ==================== 新增和修改部分结束 ====================
+// ===============================================================
 
 fn update_linux_hosts_file(best_ips: &HashMap<String, String>) -> Result<()> {
     if best_ips.is_empty() {
@@ -425,88 +481,66 @@ fn update_linux_hosts_file(best_ips: &HashMap<String, String>) -> Result<()> {
         return Ok(());
     }
     
-    // 确保hosts文件存在
     if !Path::new(HOSTS_PATH).exists() {
         return Err(anyhow::anyhow!("hosts文件 {} 不存在", HOSTS_PATH));
     }
     
     println!("读取当前hosts文件: {}", HOSTS_PATH);
     
-    // 读取当前hosts文件
     let file = File::open(HOSTS_PATH).context("打开hosts文件失败")?;
-    let reader = BufReader::new(file);
     
-    // 处理hosts文件
     let mut new_lines = Vec::new();
     let mut in_custom_section = false;
-    let mut found_marker = false;
-    
-    for line in reader.lines() {
+    let mut section_content_removed = false;
+
+    // 读取并过滤掉我们管理的部分
+    for line in BufReader::new(file).lines() {
         let line = line.context("读取hosts文件行失败")?;
         
         if line.trim() == HOSTS_MARKER_START {
             in_custom_section = true;
-            found_marker = true;
-            new_lines.push(line);
-            continue;
-        }
-        
-        if line.trim() == HOSTS_MARKER_END {
+        } else if line.trim() == HOSTS_MARKER_END {
             in_custom_section = false;
-            new_lines.push(line);
-            continue;
-        }
-        
-        if !in_custom_section {
+            section_content_removed = true;
+        } else if !in_custom_section {
             new_lines.push(line);
         }
     }
     
-    // 如果没有找到标记，在末尾添加
-    if !found_marker {
-        println!("向hosts文件添加TCP Speed Test标记");
-        new_lines.push(String::new()); // 空行作为间隔
+    // 如果没有找到我们的标记，则在文件末尾添加
+    if !section_content_removed {
+        new_lines.push(String::new()); // 空行
         new_lines.push(HOSTS_MARKER_START.to_string());
         new_lines.push(HOSTS_MARKER_END.to_string());
     }
-    
-    // 找到插入条目的位置
-    let mut insert_pos = 0;
-    for (i, line) in new_lines.iter().enumerate() {
-        if line.trim() == HOSTS_MARKER_START {
-            insert_pos = i + 1;
-            break;
-        }
+
+    // 准备要插入的新条目
+    let mut entries_to_insert = Vec::new();
+    entries_to_insert.push(HOSTS_MARKER_START.to_string());
+    let mut sorted_best_ips: Vec<_> = best_ips.iter().collect();
+    sorted_best_ips.sort_by_key(|(domain, _)| *domain);
+
+    println!("以下条目将被写入hosts文件:");
+    for (domain, ip) in sorted_best_ips {
+        let entry = format!("{} {}", ip, domain);
+        println!("  {}", entry);
+        entries_to_insert.push(entry);
     }
-    
-    // 插入我们的条目
-    let mut entries = Vec::new();
-    for (domain, ip) in best_ips {
-        entries.push(format!("{} {}", ip, domain));
-    }
-    
-    // 排序条目以便输出一致
-    entries.sort();
-    
-    // 在正确位置插入条目
-    for entry in entries {
-        new_lines.insert(insert_pos, entry);
-        insert_pos += 1;
-    }
-    
+    entries_to_insert.push(HOSTS_MARKER_END.to_string());
+
+    // 将新条目添加到内容中
+    new_lines.extend(entries_to_insert);
+
     // 创建临时文件用于写入
     let temp_path = "/tmp/hosts.new";
     let mut temp_file = File::create(temp_path).context("创建临时hosts文件失败")?;
     
-    // 写入新内容
-    for line in new_lines {
-        writeln!(temp_file, "{}", line).context("写入临时hosts文件失败")?;
-    }
+    writeln!(temp_file, "{}", new_lines.join("\n")).context("写入临时hosts文件失败")?;
     
     // 使用sudo替换hosts文件
     println!("使用sudo更新hosts文件...");
     let status = Command::new("sudo")
-        .args(&["cp", temp_path, HOSTS_PATH])
+        .args(["cp", temp_path, HOSTS_PATH])
         .status()
         .context("执行sudo cp命令失败")?;
     
